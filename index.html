@@ -130,8 +130,14 @@
   ::-webkit-scrollbar-corner { background: #f0f0f0; }
 
   /* FILL HANDLE */
-  .fill-handle { position: absolute; bottom: -3px; right: -3px; width: 7px; height: 7px; background: #217346; border: 1px solid white; cursor: crosshair; z-index: 10; display: none; }
+  .fill-handle { position: absolute; bottom: -4px; right: -4px; width: 9px; height: 9px; background: #217346; border: 2px solid white; cursor: crosshair; z-index: 20; display: none; touch-action: none; box-shadow: 0 0 2px rgba(0,0,0,0.4); }
+  .cell.selected { position: relative; }
   .cell.selected .fill-handle { display: block; }
+  /* Fill preview overlay */
+  .fill-preview { background: rgba(33,115,70,0.12) !important; outline: 1px dashed #217346 !important; }
+  @media (pointer: coarse) {
+    .fill-handle { width: 18px; height: 18px; bottom: -9px; right: -9px; border-radius: 3px; }
+  }
 
   /* FIND BAR */
   #find-bar { display: none; position: absolute; top: 8px; right: 20px; background: white; border: 1px solid #aaa; border-radius: 4px; padding: 6px 10px; box-shadow: 2px 4px 12px rgba(0,0,0,0.2); z-index: 500; display: none; gap: 6px; align-items: center; }
@@ -542,6 +548,7 @@ function buildGrid() {
 
   setupColResize();
   setupRowResize();
+  setupFillHandle();
   highlightSelection();
 }
 
@@ -619,6 +626,8 @@ document.addEventListener('mouseup', () => { isDragging = false; });
 
 function highlightSelection() {
   const table = document.getElementById('grid');
+  // Remove all old fill handles
+  document.querySelectorAll('.fill-handle').forEach(el => el.remove());
   // Clear all highlights
   for (let r = 0; r < ROWS; r++) {
     if (!table.rows[r + 1]) continue;
@@ -652,6 +661,15 @@ function highlightSelection() {
   } else {
     const td = getCell(selectedCell.r, selectedCell.c);
     if (td) td.classList.add('selected');
+  }
+
+  // Add fill handle to the bottom-right corner of the selection
+  const anchorTd = getCell(r2, c2);
+  if (anchorTd) {
+    const fh = document.createElement('div');
+    fh.className = 'fill-handle';
+    fh.title = 'Trascina per riempire';
+    anchorTd.appendChild(fh);
   }
 }
 
@@ -1338,6 +1356,139 @@ function setupColResize() {
     }, { passive: false });
   });
 }
+
+
+// FILL HANDLE
+let fillDragging = false;
+
+function setupFillHandle() {
+  const grid = document.getElementById('grid');
+
+  function startFill(clientX, clientY) {
+    if (!selectionRange) return;
+    fillDragging = true;
+    document.getElementById('status-mode').textContent = 'Riempimento…';
+
+    const srcR1 = Math.min(selectionRange.start.r, selectionRange.end.r);
+    const srcR2 = Math.max(selectionRange.start.r, selectionRange.end.r);
+    const srcC1 = Math.min(selectionRange.start.c, selectionRange.end.c);
+    const srcC2 = Math.max(selectionRange.start.c, selectionRange.end.c);
+    let lastTargetR = srcR2, lastTargetC = srcC2;
+
+    function getTarget(cx, cy) {
+      const el = document.elementFromPoint(cx, cy);
+      if (!el) return null;
+      const td = el.closest('td[data-r]');
+      if (!td) return null;
+      return { r: parseInt(td.dataset.r), c: parseInt(td.dataset.c) };
+    }
+
+    function showPreview(tr, tc) {
+      document.querySelectorAll('.fill-preview').forEach(el => el.classList.remove('fill-preview'));
+      const dR = tr - srcR2, dC = tc - srcC2;
+      const goDown  = dR > 0 && Math.abs(dR) >= Math.abs(dC);
+      const goUp    = dR < 0 && Math.abs(dR) >= Math.abs(dC);
+      const goRight = dC > 0 && Math.abs(dC) > Math.abs(dR);
+      const goLeft  = dC < 0 && Math.abs(dC) > Math.abs(dR);
+      let pr1=srcR1, pr2=srcR2, pc1=srcC1, pc2=srcC2;
+      if (goDown) pr2 = tr;
+      if (goUp)   pr1 = tr;
+      if (goRight) pc2 = tc;
+      if (goLeft)  pc1 = tc;
+      for (let r = Math.min(pr1,srcR1); r <= Math.max(pr2,srcR2); r++)
+        for (let c = Math.min(pc1,srcC1); c <= Math.max(pc2,srcC2); c++) {
+          if (r >= srcR1 && r <= srcR2 && c >= srcC1 && c <= srcC2) continue;
+          getCell(r, c)?.classList.add('fill-preview');
+        }
+      lastTargetR = tr; lastTargetC = tc;
+    }
+
+    function doFill(tr, tc) {
+      document.querySelectorAll('.fill-preview').forEach(el => el.classList.remove('fill-preview'));
+      const dR = tr - srcR2, dC = tc - srcC2;
+      const goDown  = dR > 0 && Math.abs(dR) >= Math.abs(dC);
+      const goUp    = dR < 0 && Math.abs(dR) >= Math.abs(dC);
+      const goRight = dC > 0 && Math.abs(dC) > Math.abs(dR);
+      const goLeft  = dC < 0 && Math.abs(dC) > Math.abs(dR);
+      if (!goDown && !goUp && !goRight && !goLeft) return;
+      pushUndo();
+      if (goDown || goUp) {
+        for (let c = srcC1; c <= srcC2; c++) {
+          const vals = [];
+          for (let r = srcR1; r <= srcR2; r++) vals.push(getData()[cellId(r,c)] || '');
+          const rows = goDown ? rng(srcR2+1, tr+1) : rng(tr, srcR1).reverse();
+          rows.forEach((r, i) => {
+            const si = i % vals.length;
+            getData()[cellId(r,c)] = fillValue(vals[si], srcR1+si, c, r, c);
+          });
+        }
+        selectionRange = { start:{r:goDown?srcR1:tr, c:srcC1}, end:{r:goDown?tr:srcR2, c:srcC2} };
+      } else {
+        for (let r = srcR1; r <= srcR2; r++) {
+          const vals = [];
+          for (let c = srcC1; c <= srcC2; c++) vals.push(getData()[cellId(r,c)] || '');
+          const cols = goRight ? rng(srcC2+1, tc+1) : rng(tc, srcC1).reverse();
+          cols.forEach((c, i) => {
+            const si = i % vals.length;
+            getData()[cellId(r,c)] = fillValue(vals[si], r, srcC1+si, r, c);
+          });
+        }
+        selectionRange = { start:{r:srcR1, c:goRight?srcC1:tc}, end:{r:srcR2, c:goRight?tc:srcC2} };
+      }
+      refreshAll(); highlightSelection();
+      document.getElementById('status-mode').textContent = 'Pronto';
+    }
+
+    function onMM(e) { const t=getTarget(e.clientX,e.clientY); if(t) showPreview(t.r,t.c); }
+    function onMU(e) { const t=getTarget(e.clientX,e.clientY); if(t) doFill(t.r,t.c); cleanup(); }
+    function onTM(e) { e.preventDefault(); const t=getTarget(e.touches[0].clientX,e.touches[0].clientY); if(t) showPreview(t.r,t.c); }
+    function onTE(e) { e.preventDefault(); doFill(lastTargetR, lastTargetC); cleanup(); }
+
+    function cleanup() {
+      fillDragging = false;
+      document.querySelectorAll('.fill-preview').forEach(el => el.classList.remove('fill-preview'));
+      document.removeEventListener('mousemove', onMM);
+      document.removeEventListener('mouseup',   onMU);
+      document.removeEventListener('touchmove', onTM);
+      document.removeEventListener('touchend',  onTE);
+      document.getElementById('status-mode').textContent = 'Pronto';
+    }
+    document.addEventListener('mousemove', onMM);
+    document.addEventListener('mouseup',   onMU);
+    document.addEventListener('touchmove', onTM, { passive: false });
+    document.addEventListener('touchend',  onTE, { passive: false });
+  }
+
+  grid.addEventListener('mousedown', (e) => {
+    if (!e.target.classList.contains('fill-handle')) return;
+    e.stopPropagation(); e.preventDefault();
+    startFill(e.clientX, e.clientY);
+  });
+  grid.addEventListener('touchstart', (e) => {
+    if (!e.target.classList.contains('fill-handle')) return;
+    e.stopPropagation(); e.preventDefault();
+    startFill(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+}
+
+function fillValue(raw, srcR, srcC, dstR, dstC) {
+  if (raw === '' || raw === undefined || raw === null) return '';
+  if (raw[0] === '=') {
+    return '=' + raw.slice(1).replace(/([A-Z]+)(\d+)/g, (m, col, rowNum) => {
+      const p = parseRef(col + rowNum);
+      if (!p) return m;
+      const nr = p.r + (dstR - srcR), nc = p.c + (dstC - srcC);
+      if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return m;
+      return cellId(nr, nc);
+    });
+  }
+  const n = parseFloat(raw);
+  if (!isNaN(n) && String(raw).trim() !== '')
+    return String(n + (dstR - srcR) + (dstC - srcC));
+  return raw;
+}
+
+function rng(from, to) { const a = []; for (let i = from; i < to; i++) a.push(i); return a; }
 
 // ROW RESIZE
 function applyRowHeight(row, newH) {
