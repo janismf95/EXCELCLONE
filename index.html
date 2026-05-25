@@ -64,7 +64,7 @@
   .col-header { background: #f2f2f2; text-align: center; font-size: 11px; font-weight: 600; color: #666; min-width: 64px; width: 64px; height: 20px; cursor: pointer; border-bottom: 2px solid #c0c0c0; white-space: nowrap; overflow: hidden; position: sticky; top: 0; z-index: 10; }
   .col-header:hover, .col-header.sel { background: #d6e4f0; color: #1a5fa8; }
   .col-header.sel { border-bottom-color: #217346; }
-  .row-header { background: #f2f2f2; text-align: center; font-size: 11px; font-weight: 600; color: #666; width: 44px; min-width: 44px; max-width: 44px; height: 22px; cursor: pointer; border-right: 2px solid #c0c0c0; position: sticky; left: 0; z-index: 5; }
+  .row-header { background: #f2f2f2; text-align: center; font-size: 11px; font-weight: 600; color: #666; width: 44px; min-width: 44px; max-width: 44px; height: 22px; cursor: pointer; border-right: 2px solid #c0c0c0; position: sticky; left: 0; z-index: 5; position: relative; overflow: visible; }
   .row-header:hover, .row-header.sel { background: #d6e4f0; color: #1a5fa8; }
   .corner-header { background: #f2f2f2; position: sticky; top: 0; left: 0; z-index: 20; border-right: 2px solid #c0c0c0; border-bottom: 2px solid #c0c0c0; cursor: pointer; width: 44px; min-width: 44px; }
   .corner-header:hover { background: #d0d0d0; }
@@ -110,10 +110,16 @@
   /* RESIZE HANDLE */
   .col-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 15; touch-action: none; }
   .col-resize:hover, .col-resize.dragging { background: #217346; }
-  /* Larger touch target on touch devices */
   @media (pointer: coarse) {
     .col-resize { width: 18px; right: -5px; background: rgba(33,115,70,0.15); border-right: 3px solid #217346; }
     .col-resize.dragging { background: rgba(33,115,70,0.4); }
+  }
+
+  .row-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: row-resize; z-index: 15; touch-action: none; }
+  .row-resize:hover, .row-resize.dragging { background: #217346; }
+  @media (pointer: coarse) {
+    .row-resize { height: 18px; bottom: -5px; background: rgba(33,115,70,0.15); border-bottom: 3px solid #217346; }
+    .row-resize.dragging { background: rgba(33,115,70,0.4); }
   }
 
   /* SCROLLBAR */
@@ -348,7 +354,7 @@
 
 <script>
 const ROWS = 50, COLS = 26;
-const sheets = [{ name: 'Foglio1', data: {}, style: {}, colWidths: {} }];
+const sheets = [{ name: 'Foglio1', data: {}, style: {}, colWidths: {}, rowHeights: {} }];
 let currentSheet = 0;
 let selectedCell = { r: 0, c: 0 };
 let selectionRange = null;
@@ -509,11 +515,15 @@ function buildGrid() {
   // Data rows
   for (let r = 0; r < ROWS; r++) {
     const row = table.insertRow();
-    const rh = row.insertCell();
-    rh.className = 'row-header';
-    rh.textContent = r + 1;
-    rh.dataset.row = r;
-    rh.onclick = () => selectRow(r);
+    const rh = sheets[currentSheet].rowHeights[r] || 22;
+    row.style.height = rh + 'px';
+
+    const rhCell = row.insertCell();
+    rhCell.className = 'row-header';
+    rhCell.style.height = rh + 'px';
+    rhCell.dataset.row = r;
+    rhCell.innerHTML = `${r + 1}<div class="row-resize" data-row="${r}"></div>`;
+    rhCell.onclick = (e) => { if (!e.target.classList.contains('row-resize')) selectRow(r); };
 
     for (let c = 0; c < COLS; c++) {
       const td = row.insertCell();
@@ -531,6 +541,7 @@ function buildGrid() {
   }
 
   setupColResize();
+  setupRowResize();
   highlightSelection();
 }
 
@@ -1266,7 +1277,7 @@ function switchSheet(i) {
 }
 
 function addSheet() {
-  sheets.push({ name: `Foglio${sheets.length + 1}`, data: {}, style: {}, colWidths: {} });
+  sheets.push({ name: `Foglio${sheets.length + 1}`, data: {}, style: {}, colWidths: {}, rowHeights: {} });
   switchSheet(sheets.length - 1);
 }
 
@@ -1328,7 +1339,55 @@ function setupColResize() {
   });
 }
 
-// SAVE/LOAD CSV
+// ROW RESIZE
+function applyRowHeight(row, newH) {
+  newH = Math.max(14, newH);
+  sheets[currentSheet].rowHeights[row] = newH;
+  const tr = document.getElementById('grid').rows[row + 1];
+  if (!tr) return;
+  tr.style.height = newH + 'px';
+  tr.cells[0].style.height = newH + 'px';
+}
+
+function setupRowResize() {
+  document.querySelectorAll('.row-resize').forEach(handle => {
+    let startY, startH, row;
+
+    // ── MOUSE ──
+    handle.onmousedown = (e) => {
+      row = parseInt(handle.dataset.row);
+      startY = e.clientY;
+      startH = sheets[currentSheet].rowHeights[row] || 22;
+      handle.classList.add('dragging');
+      const onMove = (ev) => applyRowHeight(row, startH + ev.clientY - startY);
+      const onUp   = () => { handle.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      e.stopPropagation(); e.preventDefault();
+    };
+
+    // ── TOUCH ──
+    handle.addEventListener('touchstart', (e) => {
+      row = parseInt(handle.dataset.row);
+      startY = e.touches[0].clientY;
+      startH = sheets[currentSheet].rowHeights[row] || 22;
+      handle.classList.add('dragging');
+      e.stopPropagation(); e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchmove', (e) => {
+      applyRowHeight(row, startH + e.touches[0].clientY - startY);
+      e.stopPropagation(); e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchend', (e) => {
+      handle.classList.remove('dragging');
+      e.stopPropagation(); e.preventDefault();
+    }, { passive: false });
+  });
+}
+
+
 function saveCSV() {
   const data = getData();
   let maxR = 0, maxC = 0;
