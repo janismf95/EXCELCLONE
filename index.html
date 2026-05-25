@@ -2,7 +2,9 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Foglio di Calcolo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
@@ -43,7 +45,7 @@
   #formulabar { display: flex; align-items: center; border-bottom: 1px solid #d0d0d0; background: #fff; padding: 4px 6px; gap: 4px; }
   #cell-ref { width: 72px; border: 1px solid #ccc; border-radius: 3px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: 600; }
   #formula-separator { color: #999; padding: 0 2px; font-size: 16px; }
-  #formula-input { flex: 1; border: 1px solid #ccc; border-radius: 3px; padding: 5px 8px; font-size: 14px; outline: none; font-family: 'Consolas', monospace; min-height: 32px; -webkit-user-select: text; user-select: text; }
+  #formula-input { flex: 1; border: 1px solid #ccc; border-radius: 3px; padding: 5px 8px; font-size: 16px; outline: none; font-family: 'Consolas', monospace; min-height: 32px; -webkit-user-select: text; user-select: text; }
   #formula-input:focus { border-color: #217346; background: #f0fff4; box-shadow: 0 0 0 2px rgba(33,115,70,0.15); }
   #fx-label { font-size: 12px; color: #555; font-style: italic; padding: 0 4px; }
   #btn-confirm { background: #217346; color: white; border: none; border-radius: 3px; padding: 5px 12px; font-size: 16px; cursor: pointer; touch-action: manipulation; line-height: 1; }
@@ -75,7 +77,7 @@
   .cell.in-range { background: #e8f4fd !important; }
   .cell.editing { outline: 2px solid #217346; background: white !important; }
 
-  .cell-input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; outline: 2px solid #217346; outline-offset: -2px; padding: 0 4px; font-size: 12px; font-family: inherit; background: white; z-index: 100; }
+  .cell-input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; outline: 2px solid #217346; outline-offset: -2px; padding: 0 4px; font-size: 16px; font-family: inherit; background: white; z-index: 100; }
 
   /* ALIGNMENT */
   .align-left { text-align: left; }
@@ -581,7 +583,7 @@ function refreshAll() {
   const table = document.getElementById('grid');
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      const td = table.rows[r + 1]?.cells[c + 1];
+      const td = (table.rows[r + 1] ? table.rows[r + 1].cells[c + 1] : undefined);
       if (td) renderCell(td, r, c);
     }
   }
@@ -589,7 +591,7 @@ function refreshAll() {
 }
 
 function getCell(r, c) {
-  return document.getElementById('grid').rows[r + 1]?.cells[c + 1];
+  return (document.getElementById('grid').rows[r + 1] ? document.getElementById('grid').rows[r + 1].cells[c + 1] : undefined);
 }
 
 // SELECTION
@@ -631,14 +633,14 @@ function highlightSelection() {
   // Clear all highlights
   for (let r = 0; r < ROWS; r++) {
     if (!table.rows[r + 1]) continue;
-    table.rows[r + 1].cells[0]?.classList.remove('sel');
+    (table.rows[r + 1].cells[0] && table.rows[r + 1].cells[0].classList.remove('sel'));
     for (let c = 0; c < COLS; c++) {
       const td = table.rows[r + 1].cells[c + 1];
       if (td) { td.classList.remove('selected','in-range'); }
     }
   }
   for (let c = 0; c < COLS; c++) {
-    table.rows[0]?.cells[c + 1]?.classList.remove('sel');
+    (table.rows[0] && table.rows[0].cells[c + 1] && table.rows[0].cells[c + 1].classList.remove('sel'));
   }
 
   if (!selectionRange) return;
@@ -654,10 +656,10 @@ function highlightSelection() {
         else td.classList.add('in-range');
       }
     }
-    if (r1 !== r2 || c1 !== c2) table.rows[r + 1]?.cells[0]?.classList.add('sel');
+    if (r1 !== r2 || c1 !== c2) (table.rows[r + 1] && table.rows[r + 1].cells[0] && table.rows[r + 1].cells[0].classList.add('sel'));
   }
   if (r1 !== r2 || c1 !== c2) {
-    for (let c = c1; c <= c2; c++) table.rows[0]?.cells[c + 1]?.classList.add('sel');
+    for (let c = c1; c <= c2; c++) (table.rows[0] && table.rows[0].cells[c + 1] && table.rows[0].cells[c + 1].classList.add('sel'));
   } else {
     const td = getCell(selectedCell.r, selectedCell.c);
     if (td) td.classList.add('selected');
@@ -779,7 +781,7 @@ function commitEdit() {
   const { r, c } = editingCell;
   const td = getCell(r, c);
   // Touch mode: value comes from formula bar; desktop: from inline input
-  const inlineInp = td?.querySelector('input');
+  const inlineInp = td ? td.querySelector('input') : null;
   const val = inlineInp ? inlineInp.value : document.getElementById('formula-input').value;
   const key = cellId(r, c);
   pushUndo();
@@ -845,7 +847,7 @@ function formulaKeyDown(e) {
 function formulaInput(e) {
   if (editingCell) {
     const td = getCell(editingCell.r, editingCell.c);
-    const inp = td?.querySelector('input');
+    const inp = td ? td.querySelector('input') : null;
     if (inp) inp.value = e.target.value;
   }
 }
@@ -890,7 +892,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key.length === 1 && !e.altKey) {
     startEdit(r, c);
     const td = getCell(r, c);
-    const inp = td?.querySelector('input');
+    const inp = td ? td.querySelector('input') : null;
     if (inp) { inp.value = e.key; inp.dispatchEvent(new Event('input')); }
     e.preventDefault();
   }
@@ -1270,7 +1272,7 @@ function gotoFindMatch(i) {
   selectedCell = { r, c };
   selectionRange = { start: { r, c }, end: { r, c } };
   highlightSelection(); updateCellRef(); updateFormulaBar();
-  getCell(r, c)?.scrollIntoView({ block: 'center', inline: 'center' });
+  var _sc = getCell(r, c); if (_sc) _sc.scrollIntoView({ block: 'center', inline: 'center' });
 }
 
 // SHEETS
@@ -1398,7 +1400,7 @@ function setupFillHandle() {
       for (let r = Math.min(pr1,srcR1); r <= Math.max(pr2,srcR2); r++)
         for (let c = Math.min(pc1,srcC1); c <= Math.max(pc2,srcC2); c++) {
           if (r >= srcR1 && r <= srcR2 && c >= srcC1 && c <= srcC2) continue;
-          getCell(r, c)?.classList.add('fill-preview');
+          var _fp = getCell(r, c); if (_fp) _fp.classList.add('fill-preview');
         }
       lastTargetR = tr; lastTargetC = tc;
     }
