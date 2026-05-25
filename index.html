@@ -108,8 +108,13 @@
   .color-swatch:hover { transform: scale(1.2); }
 
   /* RESIZE HANDLE */
-  .col-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; z-index: 15; }
+  .col-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 15; touch-action: none; }
   .col-resize:hover, .col-resize.dragging { background: #217346; }
+  /* Larger touch target on touch devices */
+  @media (pointer: coarse) {
+    .col-resize { width: 18px; right: -5px; background: rgba(33,115,70,0.15); border-right: 3px solid #217346; }
+    .col-resize.dragging { background: rgba(33,115,70,0.4); }
+  }
 
   /* SCROLLBAR */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -1278,25 +1283,48 @@ function renameSheet(i, tab) {
 }
 
 // COL RESIZE
+function applyColWidth(col, newW) {
+  newW = Math.max(20, newW);
+  sheets[currentSheet].colWidths[col] = newW;
+  document.querySelectorAll(`[data-col="${col}"]`).forEach(el => { el.style.width = newW + 'px'; el.style.minWidth = newW + 'px'; });
+  document.querySelectorAll(`.cell[data-c="${col}"]`).forEach(el => { el.style.width = newW + 'px'; el.style.minWidth = newW + 'px'; el.style.maxWidth = newW + 'px'; });
+}
+
 function setupColResize() {
   document.querySelectorAll('.col-resize').forEach(handle => {
     let startX, startW, col;
+
+    // ── MOUSE ──
     handle.onmousedown = (e) => {
       col = parseInt(handle.dataset.col);
       startX = e.clientX;
       startW = sheets[currentSheet].colWidths[col] || 64;
       handle.classList.add('dragging');
-      const onMove = (ev) => {
-        const newW = Math.max(20, startW + ev.clientX - startX);
-        sheets[currentSheet].colWidths[col] = newW;
-        document.querySelectorAll(`[data-col="${col}"]`).forEach(el => { el.style.width = newW + 'px'; el.style.minWidth = newW + 'px'; });
-        document.querySelectorAll(`.cell[data-c="${col}"]`).forEach(el => { el.style.width = newW + 'px'; el.style.minWidth = newW + 'px'; el.style.maxWidth = newW + 'px'; });
-      };
-      const onUp = () => { handle.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+      const onMove = (ev) => applyColWidth(col, startW + ev.clientX - startX);
+      const onUp   = () => { handle.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
       e.stopPropagation(); e.preventDefault();
     };
+
+    // ── TOUCH ──
+    handle.addEventListener('touchstart', (e) => {
+      col = parseInt(handle.dataset.col);
+      startX = e.touches[0].clientX;
+      startW = sheets[currentSheet].colWidths[col] || 64;
+      handle.classList.add('dragging');
+      e.stopPropagation(); e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchmove', (e) => {
+      applyColWidth(col, startW + e.touches[0].clientX - startX);
+      e.stopPropagation(); e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchend', (e) => {
+      handle.classList.remove('dragging');
+      e.stopPropagation(); e.preventDefault();
+    }, { passive: false });
   });
 }
 
