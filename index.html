@@ -40,12 +40,16 @@
   .color-indicator { position: absolute; bottom: 0; left: 2px; right: 2px; height: 4px; border-radius: 1px; }
 
   /* FORMULA BAR */
-  #formulabar { display: flex; align-items: center; border-bottom: 1px solid #d0d0d0; background: #fff; padding: 2px 4px; gap: 4px; }
+  #formulabar { display: flex; align-items: center; border-bottom: 1px solid #d0d0d0; background: #fff; padding: 4px 6px; gap: 4px; }
   #cell-ref { width: 72px; border: 1px solid #ccc; border-radius: 3px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: 600; }
   #formula-separator { color: #999; padding: 0 2px; font-size: 16px; }
-  #formula-input { flex: 1; border: 1px solid transparent; border-radius: 3px; padding: 3px 6px; font-size: 12px; outline: none; font-family: 'Consolas', monospace; }
-  #formula-input:focus { border-color: #217346; background: #f0fff4; }
+  #formula-input { flex: 1; border: 1px solid #ccc; border-radius: 3px; padding: 5px 8px; font-size: 14px; outline: none; font-family: 'Consolas', monospace; min-height: 32px; -webkit-user-select: text; user-select: text; }
+  #formula-input:focus { border-color: #217346; background: #f0fff4; box-shadow: 0 0 0 2px rgba(33,115,70,0.15); }
   #fx-label { font-size: 12px; color: #555; font-style: italic; padding: 0 4px; }
+  #btn-confirm { background: #217346; color: white; border: none; border-radius: 3px; padding: 5px 12px; font-size: 16px; cursor: pointer; touch-action: manipulation; line-height: 1; }
+  #btn-confirm:active { background: #1a5c38; }
+  #btn-cancel { background: #e53935; color: white; border: none; border-radius: 3px; padding: 5px 10px; font-size: 16px; cursor: pointer; touch-action: manipulation; line-height: 1; }
+  #btn-cancel:active { background: #b71c1c; }
   #btn-edit-cell { background: #217346; color: white; border: none; border-radius: 3px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
   #btn-edit-cell:active { background: #1a5c38; }
 
@@ -285,7 +289,7 @@
   <input type="text" id="cell-ref" value="A1" readonly>
   <span id="fx-label"><i>fx</i></span>
   <input type="text" id="formula-input" placeholder="Inserisci valore o formula (es. =SOMMA(A1:A10))" onkeydown="formulaKeyDown(event)" oninput="formulaInput(event)">
-  <button id="btn-edit-cell" onclick="startEdit(selectedCell.r, selectedCell.c)" title="Modifica cella (doppio tocco)">✏️ Modifica</button>
+  <button id="btn-confirm" onclick="confirmFormulaBar()" title="Conferma (Invio)">✓</button><button id="btn-cancel" onclick="cancelFormulaBar()" title="Annulla (Esc)">✕</button>
 </div>
 
 <!-- FIND BAR -->
@@ -680,27 +684,37 @@ function updateFormulaBar() {
 }
 
 // TOUCH SUPPORT
+// On iOS/Android the virtual keyboard only appears if focus() is called
+// synchronously inside the touch handler — no setTimeout, no rAF.
+// Strategy: on every cell tap we immediately focus #formula-input (always in DOM),
+// which reliably triggers the keyboard. The formula bar is the editing surface on touch.
 let lastTouchCell = null, lastTouchTime = 0;
+
 function cellTouchEnd(e, r, c) {
+  e.preventDefault();
   const now = Date.now();
-  const isDoubleTap = lastTouchCell && lastTouchCell.r === r && lastTouchCell.c === c && (now - lastTouchTime) < 400;
   lastTouchCell = { r, c }; lastTouchTime = now;
-  if (isDoubleTap) {
-    e.preventDefault();
-    startEdit(r, c);
-    return;
+
+  // Commit any pending edit on a different cell
+  if (editingCell && (editingCell.r !== r || editingCell.c !== c)) {
+    commitEdit();
   }
-  // Single tap: select cell
-  if (editingCell && (editingCell.r !== r || editingCell.c !== c)) commitEdit();
-  else if (!editingCell) {
-    selectedCell = { r, c };
-    selectionRange = { start: { r, c }, end: { r, c } };
-    updateCellRef(); updateFormulaBar(); highlightSelection(); updateStatusBar();
-    e.preventDefault();
-  }
+
+  // Select cell
+  selectedCell = { r, c };
+  selectionRange = { start: { r, c }, end: { r, c } };
+  updateCellRef(); updateFormulaBar(); highlightSelection(); updateStatusBar();
+
+  // Enter edit mode and focus formula bar immediately (synchronous — required for iOS keyboard)
+  editingCell = { r, c };
+  const fi = document.getElementById('formula-input');
+  fi.value = getData()[cellId(r, c)] || '';
+  fi.focus();                          // MUST be synchronous in touch handler
+  fi.setSelectionRange(fi.value.length, fi.value.length);
+  document.getElementById('status-mode').textContent = 'Modifica';
 }
 
-// EDITING
+// EDITING (desktop: inline cell input; touch: formula bar is the input)
 function startEdit(r, c) {
   if (editingCell) commitEdit();
   editingCell = { r, c };
@@ -711,24 +725,17 @@ function startEdit(r, c) {
   inp.type = 'text';
   inp.className = 'cell-input';
   inp.value = getData()[key] || '';
-  // These attributes help trigger the virtual keyboard on iOS/Android
   inp.setAttribute('autocomplete', 'off');
   inp.setAttribute('autocorrect', 'off');
   inp.setAttribute('autocapitalize', 'off');
   inp.setAttribute('spellcheck', 'false');
   inp.onkeydown = (e) => cellKeyDown(e, r, c);
   inp.oninput = (e) => { document.getElementById('formula-input').value = e.target.value; };
-  inp.onblur = (e) => {
-    // Delay to allow tapping other cells without double-commit
-    setTimeout(() => { if (editingCell && editingCell.r === r && editingCell.c === c) commitEdit(); }, 100);
-  };
+  inp.onblur = () => { setTimeout(() => { if (editingCell && editingCell.r === r && editingCell.c === c) commitEdit(); }, 80); };
   td.innerHTML = '';
   td.appendChild(inp);
-  // Use requestAnimationFrame to ensure DOM is ready before focusing (important on iOS)
-  requestAnimationFrame(() => {
-    inp.focus();
-    inp.setSelectionRange(inp.value.length, inp.value.length);
-  });
+  inp.focus();
+  inp.setSelectionRange(inp.value.length, inp.value.length);
   document.getElementById('formula-input').value = inp.value;
   document.getElementById('status-mode').textContent = 'Modifica';
 }
@@ -737,15 +744,17 @@ function commitEdit() {
   if (!editingCell) return;
   const { r, c } = editingCell;
   const td = getCell(r, c);
-  const inp = td?.querySelector('input');
-  if (!inp) { editingCell = null; return; }
-  const val = inp.value;
+  // Touch mode: value comes from formula bar; desktop: from inline input
+  const inlineInp = td?.querySelector('input');
+  const val = inlineInp ? inlineInp.value : document.getElementById('formula-input').value;
   const key = cellId(r, c);
   pushUndo();
   getData()[key] = val;
   editingCell = null;
-  renderCell(td, r, c);
-  td.classList.add('selected');
+  if (td) {
+    renderCell(td, r, c);
+    td.classList.add('selected');
+  }
   refreshAll();
   document.getElementById('formula-input').value = val;
   document.getElementById('status-mode').textContent = 'Pronto';
@@ -771,20 +780,31 @@ function cellKeyDown(e, r, c) {
   if (e.target) document.getElementById('formula-input').value = e.target.value;
 }
 
+function confirmFormulaBar() {
+  const key = cellId(selectedCell.r, selectedCell.c);
+  pushUndo();
+  getData()[key] = document.getElementById('formula-input').value;
+  if (editingCell) { editingCell = null; }
+  refreshAll();
+  document.getElementById('formula-input').blur();
+  document.getElementById('status-mode').textContent = 'Pronto';
+  // Navigate down on tablet after confirm
+  navigate(1, 0);
+}
+
+function cancelFormulaBar() {
+  if (editingCell) cancelEdit();
+  document.getElementById('formula-input').value = getData()[cellId(selectedCell.r, selectedCell.c)] || '';
+  document.getElementById('formula-input').blur();
+}
+
 function formulaKeyDown(e) {
   if (e.key === 'Enter') {
-    const key = cellId(selectedCell.r, selectedCell.c);
-    pushUndo();
-    getData()[key] = e.target.value;
-    if (editingCell) { editingCell = null; }
-    refreshAll();
-    navigate(1, 0);
-    e.target.blur();
+    confirmFormulaBar();
     e.preventDefault();
   } else if (e.key === 'Escape') {
-    e.target.value = getData()[cellId(selectedCell.r, selectedCell.c)] || '';
-    if (editingCell) cancelEdit();
-    e.target.blur();
+    cancelFormulaBar();
+    e.preventDefault();
   }
 }
 
