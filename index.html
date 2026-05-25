@@ -46,6 +46,8 @@
   #formula-input { flex: 1; border: 1px solid transparent; border-radius: 3px; padding: 3px 6px; font-size: 12px; outline: none; font-family: 'Consolas', monospace; }
   #formula-input:focus { border-color: #217346; background: #f0fff4; }
   #fx-label { font-size: 12px; color: #555; font-style: italic; padding: 0 4px; }
+  #btn-edit-cell { background: #217346; color: white; border: none; border-radius: 3px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+  #btn-edit-cell:active { background: #1a5c38; }
 
   /* SPREADSHEET AREA */
   #sheet-container { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -283,6 +285,7 @@
   <input type="text" id="cell-ref" value="A1" readonly>
   <span id="fx-label"><i>fx</i></span>
   <input type="text" id="formula-input" placeholder="Inserisci valore o formula (es. =SOMMA(A1:A10))" onkeydown="formulaKeyDown(event)" oninput="formulaInput(event)">
+  <button id="btn-edit-cell" onclick="startEdit(selectedCell.r, selectedCell.c)" title="Modifica cella (doppio tocco)">✏️ Modifica</button>
 </div>
 
 <!-- FIND BAR -->
@@ -514,6 +517,7 @@ function buildGrid() {
       td.onmousedown = (e) => cellMouseDown(e, r, c);
       td.ondblclick = () => startEdit(r, c);
       td.oncontextmenu = (e) => showCtxMenu(e, r, c);
+      td.addEventListener('touchend', (e) => cellTouchEnd(e, r, c), { passive: false });
     }
   }
 
@@ -675,6 +679,27 @@ function updateFormulaBar() {
   document.getElementById('num-format').value = st.numFmt || 'general';
 }
 
+// TOUCH SUPPORT
+let lastTouchCell = null, lastTouchTime = 0;
+function cellTouchEnd(e, r, c) {
+  const now = Date.now();
+  const isDoubleTap = lastTouchCell && lastTouchCell.r === r && lastTouchCell.c === c && (now - lastTouchTime) < 400;
+  lastTouchCell = { r, c }; lastTouchTime = now;
+  if (isDoubleTap) {
+    e.preventDefault();
+    startEdit(r, c);
+    return;
+  }
+  // Single tap: select cell
+  if (editingCell && (editingCell.r !== r || editingCell.c !== c)) commitEdit();
+  else if (!editingCell) {
+    selectedCell = { r, c };
+    selectionRange = { start: { r, c }, end: { r, c } };
+    updateCellRef(); updateFormulaBar(); highlightSelection(); updateStatusBar();
+    e.preventDefault();
+  }
+}
+
 // EDITING
 function startEdit(r, c) {
   if (editingCell) commitEdit();
@@ -686,11 +711,24 @@ function startEdit(r, c) {
   inp.type = 'text';
   inp.className = 'cell-input';
   inp.value = getData()[key] || '';
+  // These attributes help trigger the virtual keyboard on iOS/Android
+  inp.setAttribute('autocomplete', 'off');
+  inp.setAttribute('autocorrect', 'off');
+  inp.setAttribute('autocapitalize', 'off');
+  inp.setAttribute('spellcheck', 'false');
   inp.onkeydown = (e) => cellKeyDown(e, r, c);
-  inp.onblur = () => { if (editingCell) commitEdit(); };
+  inp.oninput = (e) => { document.getElementById('formula-input').value = e.target.value; };
+  inp.onblur = (e) => {
+    // Delay to allow tapping other cells without double-commit
+    setTimeout(() => { if (editingCell && editingCell.r === r && editingCell.c === c) commitEdit(); }, 100);
+  };
   td.innerHTML = '';
   td.appendChild(inp);
-  inp.focus();
+  // Use requestAnimationFrame to ensure DOM is ready before focusing (important on iOS)
+  requestAnimationFrame(() => {
+    inp.focus();
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  });
   document.getElementById('formula-input').value = inp.value;
   document.getElementById('status-mode').textContent = 'Modifica';
 }
